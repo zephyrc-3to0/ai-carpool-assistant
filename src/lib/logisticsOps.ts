@@ -262,7 +262,7 @@ export function updateInternationalShipmentOp(
     shipment.timeline[shipment.timeline.length - 1] = { ...last, note: shipment.note, at: timestamp }
   }
 
-  // 首次进入运输状态时自动开启地址收集，且不会重复创建收集任务
+  // 国际包裹清关完成后自动开启地址收集，且不会重复创建收集任务
   const shouldOpenCollection = collectionTriggerStatuses.includes(input.status) && !carpool.addressCollection?.enabled
 
   let carpools = data.carpools
@@ -302,7 +302,7 @@ export function updateInternationalShipmentOp(
         riderId,
         'address_required',
         '请补充收货地址',
-        `「${carpool.title}」已进入国际运输，请尽快填写你的收货地址，便于车主统一打包发货。`,
+        `「${carpool.title}」的国际包裹已完成清关，请尽快填写本次订单的收货地址，便于车主后续打包发货。`,
         carpoolId,
         timestamp,
       ))
@@ -448,6 +448,12 @@ export function saveDomesticShipmentOp(
   }
   if (status === 'shipped' && address?.status !== 'submitted') {
     return fail('该车员还没有提交有效收货地址，不能标记为已发货。', data)
+  }
+  if (status === 'shipped' && carpool.requiresDomesticFee) {
+    const feeBill = (data.domesticFeeBills ?? []).find((item) => item.carpoolId === carpoolId && item.userId === userId)
+    if (!feeBill) return fail('请先为该车员登记国内打包费和国内运费。', data)
+    if (feeBill.status === 'disputed') return fail('该车员的国内费用仍有异议，处理完成后才能发货。', data)
+    if (feeBill.status !== 'paid') return fail('该车员还没有完成国内费用模拟支付，暂不能发货。', data)
   }
   if (status === 'received' && existing?.status !== 'shipped') {
     return fail('请先把该车员的订单标记为已发货，再标记签收。', data)

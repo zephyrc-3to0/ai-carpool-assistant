@@ -10,14 +10,16 @@ import {
   navigate,
 } from '../utils'
 import { deriveDomesticStatus, getDomesticShipment, getInternationalShipment, getOrderAddress } from '../lib/logistics'
+import { formatCents } from '../lib/money'
 
 export function ShippingTrackPage({ carpoolId }: { carpoolId: string }) {
-  const { data, currentUser, completeRiderOrder } = useAppStore()
+  const { data, currentUser, payDomesticFee, completeRiderOrder } = useAppStore()
   const showToast = useToast()
   const carpool = data.carpools.find((item) => item.id === carpoolId)
   const shipment = getInternationalShipment(data, carpoolId)
   const address = getOrderAddress(data, carpoolId, currentUser.id)
   const domestic = getDomesticShipment(data, carpoolId, currentUser.id)
+  const domesticBill = (data.domesticFeeBills ?? []).find((item) => item.carpoolId === carpoolId && item.userId === currentUser.id)
   const order = data.orders.find((item) => item.carpoolId === carpoolId && item.userId === currentUser.id)
   const fulfilled = order?.fulfillmentStatus === 'completed'
 
@@ -126,10 +128,41 @@ export function ShippingTrackPage({ carpoolId }: { carpoolId: string }) {
                       : '车主已开启地址收集，请尽快填写你的收货地址。'
                     : '车主还没有开启地址收集，开启后就可以填写收货地址。'}
                 </p>
-                <Button className="mt-4" onClick={() => navigate(`/shipping/address/${carpoolId}`)}>
+                <Button className="mt-4" disabled={!collectionOpen} onClick={() => navigate(`/shipping/address/${carpoolId}`)}>
                   {addressStatus === 'overdue' ? '逾期补交地址' : '填写收货地址'}
                 </Button>
               </>
+            )}
+          </Card>
+
+          <Card className="p-5 sm:p-7">
+            <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.15em] text-primary">Domestic Fees</p>
+                <h2 className="mt-2 text-xl font-bold text-ink">国内费用</h2>
+                <p className="mt-1.5 text-sm leading-6 text-muted">打包费与国内运费按车员分别结算。</p>
+              </div>
+              {domesticBill && (
+                <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${domesticBill.status === 'paid' ? 'bg-successSoft text-success' : domesticBill.status === 'disputed' ? 'bg-dangerSoft text-danger' : 'bg-amber-50 text-amber-700'}`}>
+                  {domesticBill.status === 'paid' ? '已支付' : domesticBill.status === 'disputed' ? '费用异议中' : '待支付'}
+                </span>
+              )}
+            </div>
+            {domesticBill ? (
+              <>
+                <InfoRow label="打包费">{formatCents(domesticBill.packingFeeCents)}</InfoRow>
+                <InfoRow label="国内运费">{formatCents(domesticBill.shippingFeeCents)}</InfoRow>
+                <InfoRow label="合计">{formatCents(domesticBill.totalCents)}</InfoRow>
+                {domesticBill.status === 'pending' && (
+                  <Button className="mt-4" onClick={() => {
+                    const result = payDomesticFee(carpoolId)
+                    showToast(result.message, result.ok ? 'success' : 'error')
+                  }}>模拟支付国内费用</Button>
+                )}
+                {domesticBill.status === 'disputed' && <p className="mt-3 text-xs leading-5 text-danger">费用异议正在处理，处理完成前不能支付或发货。</p>}
+              </>
+            ) : (
+              <p className="text-sm leading-6 text-muted">车主尚未为你登记国内费用。</p>
             )}
           </Card>
 

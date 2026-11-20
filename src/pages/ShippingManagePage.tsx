@@ -14,6 +14,7 @@ import {
   fromLocalInput,
 } from '../utils'
 import { deriveDomesticStatus, getDomesticShipment, getInternationalShipment, getOrderAddress } from '../lib/logistics'
+import { formatCents } from '../lib/money'
 
 export function ShippingManagePage({ carpoolId }: { carpoolId: string }) {
   const {
@@ -22,6 +23,7 @@ export function ShippingManagePage({ carpoolId }: { carpoolId: string }) {
     updateInternationalShipment,
     confirmArrivalCheck,
     urgeAddress,
+    registerDomesticFees,
     saveDomesticShipment,
   } = useAppStore()
   const showToast = useToast()
@@ -34,6 +36,7 @@ export function ShippingManagePage({ carpoolId }: { carpoolId: string }) {
   const [status, setStatus] = useState<InternationalStatus>('waiting')
   const [note, setNote] = useState('')
   const [domesticForms, setDomesticForms] = useState<Record<string, { carrier: string; trackingNumber: string; shippedAt: string; note: string }>>({})
+  const [feeForms, setFeeForms] = useState<Record<string, { packingFee: string; shippingFee: string }>>({})
 
   useEffect(() => {
     setCarrier(shipment?.carrier ?? '')
@@ -58,6 +61,19 @@ export function ShippingManagePage({ carpoolId }: { carpoolId: string }) {
     setDomesticForms(next)
     // 仅在发货记录或车员名单变化时回填表单，避免其他状态更新打断正在输入的内容
   }, [data.domesticShipments, carpool, carpoolId])
+
+  useEffect(() => {
+    const next: Record<string, { packingFee: string; shippingFee: string }> = {}
+    carpool?.positions.forEach((slot) => {
+      if (!slot.occupantId || slot.occupantId === carpool.ownerId || next[slot.occupantId]) return
+      const bill = (data.domesticFeeBills ?? []).find((item) => item.carpoolId === carpoolId && item.userId === slot.occupantId)
+      next[slot.occupantId] = {
+        packingFee: bill ? String(bill.packingFeeCents / 100) : '',
+        shippingFee: bill ? String(bill.shippingFeeCents / 100) : '',
+      }
+    })
+    setFeeForms(next)
+  }, [data.domesticFeeBills, carpool, carpoolId])
 
   const riders = useMemo(() => {
     if (!carpool) return []
@@ -86,6 +102,9 @@ export function ShippingManagePage({ carpoolId }: { carpoolId: string }) {
   const pendingCount = addressRecords.length - submittedCount
   const collection = carpool.addressCollection
   const collectionOpen = Boolean(collection?.enabled)
+  const freightBills = (data.freightBills ?? []).filter((bill) => bill.carpoolId === carpoolId)
+  const freightPaid = freightBills.filter((bill) => bill.status === 'paid').length
+  const freightBooked = freightBills.filter((bill) => bill.status === 'booked').length
 
   const saveShipment = () => {
     const result = updateInternationalShipment(carpoolId, { carrier, trackingNumber, trackingUrl, status, note })
@@ -102,6 +121,23 @@ export function ShippingManagePage({ carpoolId }: { carpoolId: string }) {
       note: form.note,
     })
     showToast(result.message, result.ok ? 'success' : 'error')
+  }
+
+  const saveFees = (userId: string) => {
+    const form = feeForms[userId]
+    if (!form) return
+    const result = registerDomesticFees(carpoolId, userId, {
+      packingFee: Number(form.packingFee),
+      shippingFee: Number(form.shippingFee),
+    })
+    showToast(result.message, result.ok ? 'success' : 'error')
+  }
+
+  const updateFeeForm = (userId: string, key: 'packingFee' | 'shippingFee', value: string) => {
+    setFeeForms((current) => ({
+      ...current,
+      [userId]: { ...(current[userId] ?? { packingFee: '', shippingFee: '' }), [key]: value },
+    }))
   }
 
   const markReceived = (userId: string) => {
@@ -232,7 +268,7 @@ export function ShippingManagePage({ carpoolId }: { carpoolId: string }) {
                     ? collection?.closedAt
                       ? '地址收集阶段已结束，未提交地址的成员仍可补交。'
                       : '地址收集进行中，请车员尽快填写收货地址。'
-                    : '当物流状态更新为「国际运输中」及后续状态时，系统会自动开启地址收集。'}
+                    : '国际包裹清关完成并进入国内运输后，系统会自动开启地址收集。'}
                 </p>
               </div>
               <div className="flex gap-2">
@@ -303,18 +339,54 @@ export function ShippingManagePage({ carpoolId }: { carpoolId: string }) {
                   const form = domesticForms[rider.id] ?? { carrier: '', trackingNumber: '', shippedAt: '', note: '' }
                   const domesticStatus = deriveDomesticStatus(data, carpoolId, rider.id)
                   const address = getOrderAddress(data, carpoolId, rider.id)
-                  const canShip = address?.status === 'submitted'
+                  const feeBill = (data.domesticFeeBills ?? []).find((item) => item.carpoolId === carpoolId && item.userId === rider.id)
+                  const feeForm = feeForms[rider.id] ?? { packingFee: '', shippingFee: '' }
+                  const canShip = address?.status === 'submitted' && (!carpool.requiresDomesticFee || feeBill?.status === 'paid')
                   return (
                     <div key={rider.id} className="rounded-2xl border border-slate-200 bg-slate-50/50 p-4 sm:p-5">
                       <div className="flex flex-wrap items-center gap-3">
                         <Avatar user={rider} size="sm" />
                         <p className="min-w-0 flex-1 truncate text-sm font-bold text-ink">{rider.nickname}</p>
                         <DomesticStatusBadge status={domesticStatus} />
+                        <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                          feeBill?.status === 'paid'
+                            ? 'bg-successSoft text-success'
+                            : feeBill?.status === 'disputed'
+                              ? 'bg-dangerSoft text-danger'
+                              : 'bg-amber-50 text-amber-700'
+                        }`}>
+                          国内费用{feeBill?.status === 'paid' ? '已支付' : feeBill?.status === 'disputed' ? '有异议' : feeBill ? '待支付' : '未登记'}
+                        </span>
+                      </div>
+
+                      <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3.5">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-xs font-bold text-ink">国内费用</p>
+                          {feeBill && <span className="text-[11px] text-muted">合计 {formatCents(feeBill.totalCents)}</span>}
+                        </div>
+                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                          <label className="block">
+                            <span className="mb-1.5 block text-[11px] font-semibold text-muted">打包费（元）</span>
+                            <input type="number" min="0" step="0.01" className={inputClass} value={feeForm.packingFee} disabled={feeBill?.status === 'paid' || feeBill?.status === 'disputed'} onChange={(event) => updateFeeForm(rider.id, 'packingFee', event.target.value)} />
+                          </label>
+                          <label className="block">
+                            <span className="mb-1.5 block text-[11px] font-semibold text-muted">国内运费（元）</span>
+                            <input type="number" min="0" step="0.01" className={inputClass} value={feeForm.shippingFee} disabled={feeBill?.status === 'paid' || feeBill?.status === 'disputed'} onChange={(event) => updateFeeForm(rider.id, 'shippingFee', event.target.value)} />
+                          </label>
+                        </div>
+                        <Button size="sm" variant="secondary" className="mt-3" disabled={address?.status !== 'submitted' || feeBill?.status === 'paid' || feeBill?.status === 'disputed'} onClick={() => saveFees(rider.id)}>
+                          {feeBill ? '更新国内费用' : '登记国内费用'}
+                        </Button>
+                        {address?.status !== 'submitted' && <p className="mt-2 text-[11px] text-muted">车员提交地址后才能登记费用。</p>}
                       </div>
 
                       {!canShip && (
                         <p className="mt-3 rounded-xl border border-danger/20 bg-dangerSoft px-3 py-2 text-xs leading-5 text-danger">
-                          该车员尚未提交有效收货地址，录入快递单号后也无法标记为已发货。
+                          {address?.status !== 'submitted'
+                            ? '该车员尚未提交有效收货地址，暂不能发货。'
+                            : feeBill?.status === 'disputed'
+                              ? '该车员的国内费用存在异议，处理完成后才能发货。'
+                              : '该车员尚未完成国内费用模拟支付，暂不能发货。'}
                         </p>
                       )}
 
@@ -338,7 +410,7 @@ export function ShippingManagePage({ carpoolId }: { carpoolId: string }) {
                       </div>
 
                       <div className="mt-4 flex flex-wrap items-center gap-2">
-                        <Button size="sm" onClick={() => saveDomestic(rider.id)}>保存发货信息</Button>
+                        <Button size="sm" disabled={!canShip && domesticStatus !== 'shipped' && domesticStatus !== 'received'} onClick={() => saveDomestic(rider.id)}>保存发货信息</Button>
                         <Button size="sm" variant="secondary" disabled={domesticStatus !== 'shipped'} onClick={() => markReceived(rider.id)}>标记已签收</Button>
                         {domesticStatus === 'shipped' && <span className="text-[11px] text-muted">该车员已收到发货通知。</span>}
                       </div>
@@ -362,6 +434,8 @@ export function ShippingManagePage({ carpoolId }: { carpoolId: string }) {
               <InfoRow label="物流公司">{shipment?.carrier || '未录入'}</InfoRow>
               <InfoRow label="物流单号">{shipment?.trackingNumber || '未录入'}</InfoRow>
               <InfoRow label="当前状态">{shipment ? internationalStatusText[shipment.status] : '未录入'}</InfoRow>
+              <InfoRow label="整车国际运费">{formatCents(carpool.internationalFreightCents ?? 0)}</InfoRow>
+              <InfoRow label="国际运费结算">{freightBills.length ? `${freightPaid} 人已付 · ${freightBooked} 笔车主记账 · ${freightBills.length - freightPaid - freightBooked} 人待付` : '截团后生成'}</InfoRow>
               <InfoRow label="地址收集">{collectionOpen ? (collection?.closedAt ? '已结束' : '进行中') : '未开启'}</InfoRow>
               <InfoRow label="地址提交">{submittedCount} / {riders.length}</InfoRow>
             </div>
@@ -391,8 +465,8 @@ function Stat({ label, value, tone = 'primary' }: { label: string; value: number
 
 function collectionTriggerHint(status: InternationalStatus, collectionOpen: boolean) {
   if (collectionOpen) return ''
-  if (status === 'in_transit' || status === 'customs' || status === 'domestic_transit') {
-    return '保存后系统会自动开启本车的地址收集，并向车员发送补充地址提醒。'
+  if (status === 'domestic_transit' || status === 'received' || status === 'checked') {
+    return '保存后系统会开启本车地址收集，并向车员发送清关完成后的地址提醒。'
   }
   return ''
 }

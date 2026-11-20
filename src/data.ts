@@ -7,6 +7,7 @@ import type {
   DomesticShipment,
   InternationalShipment,
   Notification,
+  Order,
   OrderShippingAddress,
   ReputationEvent,
   SavedAddress,
@@ -14,9 +15,30 @@ import type {
   UserReputation,
 } from './types'
 import { levelOf, scoreFromEvents } from './lib/reputation'
+import {
+  demoEventProducts,
+  demoEvents,
+  demoGroups,
+  demoV2Carpools,
+  demoV2FreightBills,
+  demoV2Orders,
+  demoV2OwnerPurchases,
+  demoV2Participations,
+  demoV2Payments,
+} from './data.v2'
+import {
+  buildFeeSnapshot,
+  buildItemSnapshot,
+  buildRulesSnapshot,
+  defaultFeeRules,
+  defaultGuarantees,
+  fallbackRuleTemplates,
+  isLegacyCarpool,
+  purchaseModeOf,
+} from './lib/share'
 
 export const STORAGE_KEY = 'daban-carpool-mvp-v1'
-export const DATA_VERSION = 3
+export const DATA_VERSION = 7
 
 export const initialUsers: User[] = [
   { id: 'u-owner', nickname: '汽水小鹿', initial: '鹿', color: '#7557c8', province: '上海市', joinedAt: '2026-08-12T03:20:00.000Z' },
@@ -25,6 +47,12 @@ export const initialUsers: User[] = [
   { id: 'u-fourth', nickname: '薄荷糖', initial: '薄', color: '#5676a9', province: '四川省', joinedAt: '2026-09-15T11:30:00.000Z' },
 ]
 
+/**
+ * V1.3-A 演示数据覆盖三种车次形态：
+ * - car-dreamscape：整套凑套（bundle）
+ * - car-photocard：普通拼邮（single，多商品多版本）
+ * - car-plush / car-badge：历史平铺车次（legacy，验证存量兼容）
+ */
 const demoCarpools: Carpool[] = [
   {
     id: 'car-dreamscape',
@@ -37,14 +65,33 @@ const demoCarpools: Carpool[] = [
     description: '按成员位置上车，成团后统一购买。到货后会在群内同步验货与发货进度。',
     rules: '每个位置对应 1 件商品；截单前可联系车主说明情况；模拟演示不产生真实交易。',
     status: 'recruiting',
+    groupId: 'g-nct',
+    eventId: 'evt-dreamscape',
+    orderDeadline: '2026-12-18T20:00',
+    internationalFreightCents: 12000,
+    purchaseMode: 'bundle',
+    bundleSets: 1,
+    guarantees: { fullSetOrdered: true, memberDesign: true },
+    feeRules: { unitPrice: 68, serviceFee: 0, shippingFee: 0 },
+    rulesVersion: 1,
+    fallbackRule: fallbackRuleTemplates.bundle,
+    shareGroups: [
+      { id: 'grp-ds-mark', kind: 'bundle', name: 'MARK', version: 'A 版', productId: 'p-ds-agency-a', member: 'MARK', price: 68, quantity: 1, slotIds: ['ds-mark'] },
+      { id: 'grp-ds-renjun', kind: 'bundle', name: 'RENJUN', version: 'A 版', productId: 'p-ds-agency-a', member: 'RENJUN', price: 68, quantity: 1, slotIds: ['ds-renjun'] },
+      { id: 'grp-ds-jeno', kind: 'bundle', name: 'JENO', version: 'A 版', productId: 'p-ds-agency-a', member: 'JENO', price: 68, quantity: 1, slotIds: ['ds-jeno'] },
+      { id: 'grp-ds-haechan', kind: 'bundle', name: 'HAECHAN', version: 'A 版', productId: 'p-ds-agency-a', member: 'HAECHAN', price: 68, quantity: 1, slotIds: ['ds-haechan'] },
+      { id: 'grp-ds-jaemin', kind: 'bundle', name: 'JAEMIN', version: 'A 版', productId: 'p-ds-agency-a', member: 'JAEMIN', price: 68, quantity: 1, slotIds: ['ds-jaemin'] },
+      { id: 'grp-ds-chenle', kind: 'bundle', name: 'CHENLE', version: 'A 版', productId: 'p-ds-agency-a', member: 'CHENLE', price: 68, quantity: 1, slotIds: ['ds-chenle'] },
+      { id: 'grp-ds-jisung', kind: 'bundle', name: 'JISUNG', version: 'A 版', productId: 'p-ds-agency-a', member: 'JISUNG', price: 68, quantity: 1, slotIds: ['ds-jisung'] },
+    ],
     positions: [
-      { id: 'ds-mark', label: 'MARK', occupantId: 'u-third', orderId: 'order-demo-1' },
-      { id: 'ds-renjun', label: 'RENJUN' },
-      { id: 'ds-jeno', label: 'JENO' },
-      { id: 'ds-haechan', label: 'HAECHAN', occupantId: 'u-fourth', orderId: 'order-demo-2' },
-      { id: 'ds-jaemin', label: 'JAEMIN' },
-      { id: 'ds-chenle', label: 'CHENLE' },
-      { id: 'ds-jisung', label: 'JISUNG' },
+      { id: 'ds-mark', label: 'MARK', occupantId: 'u-third', orderId: 'order-demo-1', groupId: 'grp-ds-mark', price: 68, setIndex: 0 },
+      { id: 'ds-renjun', label: 'RENJUN', groupId: 'grp-ds-renjun', price: 68, setIndex: 0 },
+      { id: 'ds-jeno', label: 'JENO', groupId: 'grp-ds-jeno', price: 68, setIndex: 0 },
+      { id: 'ds-haechan', label: 'HAECHAN', occupantId: 'u-fourth', orderId: 'order-demo-2', groupId: 'grp-ds-haechan', price: 68, setIndex: 0 },
+      { id: 'ds-jaemin', label: 'JAEMIN', groupId: 'grp-ds-jaemin', price: 68, setIndex: 0 },
+      { id: 'ds-chenle', label: 'CHENLE', groupId: 'grp-ds-chenle', price: 68, setIndex: 0 },
+      { id: 'ds-jisung', label: 'JISUNG', groupId: 'grp-ds-jisung', price: 68, setIndex: 0 },
     ],
     createdAt: '2026-11-12T09:20:00.000Z',
   },
@@ -59,15 +106,32 @@ const demoCarpools: Carpool[] = [
     description: '每个成员开放两个位置，优先按付款顺序锁位。',
     rules: '默认接受轻微厂瑕；本车为课程演示数据，不代表真实活动信息。',
     status: 'recruiting',
+    groupId: 'g-nct',
+    eventId: 'evt-winter',
+    orderDeadline: '2026-12-08T22:00',
+    internationalFreightCents: 9000,
+    minAmountCents: 60000,
+    maxPackageItems: 20,
+    purchaseMode: 'single',
+    guarantees: { fullSetOrdered: false, memberDesign: false },
+    feeRules: { unitPrice: 32, serviceFee: 0, shippingFee: 0 },
+    rulesVersion: 1,
+    fallbackRule: fallbackRuleTemplates.single,
+    shareGroups: [
+      { id: 'grp-pc-mark', kind: 'product', name: '成员随机小卡', version: 'MARK', productId: 'p-winter-photocard', member: 'MARK', price: 32, quantity: 2, slotIds: ['pc-mark-1', 'pc-mark-2'] },
+      { id: 'grp-pc-renjun', kind: 'product', name: '成员随机小卡', version: 'RENJUN', productId: 'p-winter-photocard', member: 'RENJUN', price: 32, quantity: 2, slotIds: ['pc-renjun-1', 'pc-renjun-2'] },
+      { id: 'grp-pc-jeno', kind: 'product', name: '成员随机小卡', version: 'JENO', productId: 'p-winter-photocard', member: 'JENO', price: 32, quantity: 2, slotIds: ['pc-jeno-1', 'pc-jeno-2'] },
+      { id: 'grp-pc-jaemin', kind: 'product', name: '成员随机小卡', version: 'JAEMIN', productId: 'p-winter-photocard', member: 'JAEMIN', price: 32, quantity: 2, slotIds: ['pc-jaemin-1', 'pc-jaemin-2'] },
+    ],
     positions: [
-      { id: 'pc-mark-1', label: 'MARK ①' },
-      { id: 'pc-mark-2', label: 'MARK ②', occupantId: 'u-rider', orderId: 'order-demo-3' },
-      { id: 'pc-renjun-1', label: 'RENJUN ①' },
-      { id: 'pc-renjun-2', label: 'RENJUN ②' },
-      { id: 'pc-jeno-1', label: 'JENO ①', occupantId: 'u-fourth', orderId: 'order-demo-4' },
-      { id: 'pc-jeno-2', label: 'JENO ②' },
-      { id: 'pc-jaemin-1', label: 'JAEMIN ①' },
-      { id: 'pc-jaemin-2', label: 'JAEMIN ②' },
+      { id: 'pc-mark-1', label: 'MARK ①', groupId: 'grp-pc-mark', price: 32 },
+      { id: 'pc-mark-2', label: 'MARK ②', occupantId: 'u-rider', orderId: 'order-demo-3', groupId: 'grp-pc-mark', price: 32 },
+      { id: 'pc-renjun-1', label: 'RENJUN ①', groupId: 'grp-pc-renjun', price: 32 },
+      { id: 'pc-renjun-2', label: 'RENJUN ②', groupId: 'grp-pc-renjun', price: 32 },
+      { id: 'pc-jeno-1', label: 'JENO ①', occupantId: 'u-fourth', orderId: 'order-demo-4', groupId: 'grp-pc-jeno', price: 32 },
+      { id: 'pc-jeno-2', label: 'JENO ②', groupId: 'grp-pc-jeno', price: 32 },
+      { id: 'pc-jaemin-1', label: 'JAEMIN ①', groupId: 'grp-pc-jaemin', price: 32 },
+      { id: 'pc-jaemin-2', label: 'JAEMIN ②', groupId: 'grp-pc-jaemin', price: 32 },
     ],
     createdAt: '2026-11-10T12:00:00.000Z',
   },
@@ -81,7 +145,11 @@ const demoCarpools: Carpool[] = [
     deadline: '2026-11-26T21:00',
     description: '本车已拼成，等待车主在群里更新后续进度。',
     rules: '付款后不支持随意换位；物流费用到货后按实际情况补。',
-    status: 'formed',
+    status: 'cut',
+    groupId: 'g-nct',
+    eventId: 'evt-dreamscape',
+    orderDeadline: '2026-11-26T21:00',
+    internationalFreightCents: 10000,
     positions: [
       { id: 'pl-mark', label: 'MARK', occupantId: 'u-rider', orderId: 'order-demo-5' },
       { id: 'pl-renjun', label: 'RENJUN', occupantId: 'u-owner', orderId: 'order-demo-6' },
@@ -99,7 +167,10 @@ const demoCarpools: Carpool[] = [
     deadline: '2026-10-29T18:00',
     description: '演示用历史车次。',
     rules: '本车已结束。',
-    status: 'closed',
+    status: 'completed',
+    groupId: 'g-skz',
+    eventId: 'evt-rockstar',
+    orderDeadline: '2026-10-29T18:00',
     positions: [
       { id: 'bg-mark', label: 'MARK', occupantId: 'u-third', orderId: 'order-demo-8' },
       { id: 'bg-jisung', label: 'JISUNG', occupantId: 'u-fourth', orderId: 'order-demo-9' },
@@ -666,6 +737,63 @@ function buildReputations(users: User[], events: ReputationEvent[]): UserReputat
   })
 }
 
+/**
+ * V1.3-A 兼容层：旧数据没有分组信息，按 legacy 平铺位置处理，
+ * 补齐份额单价与保底字段，但不改变原有的平铺结构与既有业务数据。
+ */
+/**
+ * V2.0 状态迁移：旧车次状态映射到新的招募 / 采购生命周期。
+ */
+function migrateCarpoolStatus(status: string): Carpool['status'] {
+  switch (status) {
+    case 'pending_confirm': return 'recruiting'
+    case 'formed': return 'cut'
+    case 'ordered': return 'purchasing'
+    case 'closed': return 'completed'
+    case 'recruiting':
+    case 'expired':
+    case 'cut':
+    case 'purchasing':
+    case 'completed':
+    case 'failed':
+      return status as Carpool['status']
+    default: return 'recruiting'
+  }
+}
+
+function normalizeCarpool(carpool: Carpool): Carpool {
+  const mode = purchaseModeOf(carpool)
+  const base = {
+    guarantees: carpool.guarantees ?? (isLegacyCarpool(carpool)
+      ? { fullSetOrdered: false, memberDesign: true }
+      : defaultGuarantees(mode)),
+    feeRules: carpool.feeRules ?? defaultFeeRules(carpool.price),
+    rulesVersion: carpool.rulesVersion ?? 1,
+    fallbackRule: carpool.fallbackRule ?? fallbackRuleTemplates[mode],
+  }
+  const migrated: Carpool = { ...carpool, status: migrateCarpoolStatus(carpool.status), ...base }
+  if (!isLegacyCarpool(carpool)) return migrated
+  return {
+    ...migrated,
+    positions: carpool.positions.map((slot) => ({ ...slot, price: slot.price ?? carpool.price })),
+  }
+}
+
+/** V1.3-A 兼容层：为存量订单补齐商品 / 费用 / 规则快照（已有快照不覆盖） */
+function normalizeOrders(orders: Order[], carpools: Carpool[]): Order[] {
+  return orders.map((order) => {
+    if (order.itemSnapshot && order.feeSnapshot && order.rulesSnapshot) return order
+    const carpool = carpools.find((item) => item.id === order.carpoolId)
+    if (!carpool) return order
+    return {
+      ...order,
+      itemSnapshot: order.itemSnapshot ?? buildItemSnapshot(carpool, order.slotIds),
+      feeSnapshot: order.feeSnapshot ?? buildFeeSnapshot(carpool, order.slotIds),
+      rulesSnapshot: order.rulesSnapshot ?? buildRulesSnapshot(carpool, order.paidAt || carpool.createdAt),
+    }
+  })
+}
+
 export function createInitialData(): AppData {
   const orders: AppData['orders'] = [
     { id: 'order-demo-1', carpoolId: 'car-dreamscape', userId: 'u-third', slotIds: ['ds-mark'], amount: 68, paidAt: '2026-11-12T10:00:00.000Z' },
@@ -680,16 +808,18 @@ export function createInitialData(): AppData {
     { id: 'order-demo-9', carpoolId: 'car-badge', userId: 'u-fourth', slotIds: ['bg-jisung'], amount: 45, paidAt: '2026-10-10T10:40:00.000Z', fulfillmentStatus: 'completed', fulfilledAt: '2026-11-02T09:00:00.000Z' },
   ]
 
+  const carpools = [...demoV2Carpools, ...demoCarpools].map((carpool) => (
+    carpool.id === 'car-plush'
+      ? { ...carpool, addressCollection: { enabled: true, startedAt: '2026-11-18T02:31:00.000Z' } }
+      : carpool
+  )).map(normalizeCarpool)
+
   return {
     version: DATA_VERSION,
     users: initialUsers,
     currentUserId: 'u-owner',
-    carpools: demoCarpools.map((carpool) => (
-      carpool.id === 'car-plush'
-        ? { ...carpool, addressCollection: { enabled: true, startedAt: '2026-11-18T02:31:00.000Z' } }
-        : carpool
-    )),
-    orders,
+    carpools,
+    orders: normalizeOrders([...demoV2Orders, ...orders], carpools),
     chats: demoChats,
     savedAddresses: demoSavedAddresses,
     orderAddresses: demoOrderAddresses,
@@ -702,12 +832,26 @@ export function createInitialData(): AppData {
     appeals: demoAppeals,
     adminLogs: [],
     adminMode: false,
+    // ---------- V2.0 ----------
+    groups: demoGroups,
+    events: demoEvents,
+    eventProducts: demoEventProducts,
+    ownerPurchases: demoV2OwnerPurchases,
+    payments: demoV2Payments,
+    freightBills: demoV2FreightBills,
+    domesticFeeBills: [],
+    participations: demoV2Participations,
+    purchaseVouchers: [],
+    exceptions: [],
+    eventSubmissions: [],
+    drafts: [],
   }
 }
 
 /**
- * 兼容 V1 / V1.1 存量数据：保留原有拼车 / 订单 / 群聊与物流地址数据，
- * 补齐 V1.2 需要的信誉、投诉、申诉集合，并为老用户初始化信誉信息。
+ * 兼容 V1 / V1.1 / V1.2 存量数据：保留原有拼车 / 订单 / 群聊与物流地址数据，
+ * 补齐 V1.2 需要的信誉、投诉、申诉集合，并为老用户初始化信誉信息；
+ * V1.3-A 额外补齐份额分组、保底规则与订单快照，老车保持 legacy 平铺结构。
  */
 export function normalizeData(parsed: Partial<AppData> | null): AppData {
   const base = createInitialData()
@@ -715,12 +859,22 @@ export function normalizeData(parsed: Partial<AppData> | null): AppData {
   const carpools = parsed.carpools.map((carpool) => ({
     ...carpool,
     addressCollection: carpool.addressCollection ?? undefined,
-  }))
+  })).map(normalizeCarpool)
   const users = Array.isArray(parsed.users) && parsed.users.length ? parsed.users : base.users
   const reputationEvents = Array.isArray(parsed.reputationEvents) ? parsed.reputationEvents : []
   const reputations = Array.isArray(parsed.reputations) && parsed.reputations.length
     ? parsed.reputations
     : buildReputations(users, reputationEvents)
+  const orders = Array.isArray(parsed.orders) ? parsed.orders : base.orders
+  const chats = Array.isArray(parsed.chats)
+    ? parsed.chats.map((chat) => ({ ...chat, reads: chat.reads ?? {} }))
+    : base.chats
+  const freightBills = (Array.isArray(parsed.freightBills) ? parsed.freightBills : []).map((bill) => {
+    const carpool = carpools.find((item) => item.id === bill.carpoolId)
+    return carpool?.ownerId === bill.userId && bill.status === 'pending'
+      ? { ...bill, status: 'booked' as const }
+      : bill
+  })
 
   return {
     version: DATA_VERSION,
@@ -731,8 +885,8 @@ export function normalizeData(parsed: Partial<AppData> | null): AppData {
     })),
     currentUserId: parsed.currentUserId ?? base.currentUserId,
     carpools,
-    orders: Array.isArray(parsed.orders) ? parsed.orders : base.orders,
-    chats: Array.isArray(parsed.chats) ? parsed.chats : base.chats,
+    orders: normalizeOrders(orders, carpools),
+    chats,
     savedAddresses: Array.isArray(parsed.savedAddresses) ? parsed.savedAddresses : [],
     orderAddresses: Array.isArray(parsed.orderAddresses) ? parsed.orderAddresses : [],
     internationalShipments: Array.isArray(parsed.internationalShipments) ? parsed.internationalShipments : [],
@@ -744,5 +898,18 @@ export function normalizeData(parsed: Partial<AppData> | null): AppData {
     appeals: Array.isArray(parsed.appeals) ? parsed.appeals : [],
     adminLogs: Array.isArray(parsed.adminLogs) ? parsed.adminLogs : [],
     adminMode: Boolean(parsed.adminMode),
+    // ---------- V2.0 存量兼容 ----------
+    groups: Array.isArray(parsed.groups) && parsed.groups.length ? parsed.groups : base.groups,
+    events: Array.isArray(parsed.events) && parsed.events.length ? parsed.events : base.events,
+    eventProducts: Array.isArray(parsed.eventProducts) && parsed.eventProducts.length ? parsed.eventProducts : base.eventProducts,
+    ownerPurchases: Array.isArray(parsed.ownerPurchases) ? parsed.ownerPurchases : [],
+    payments: Array.isArray(parsed.payments) ? parsed.payments : [],
+    freightBills,
+    domesticFeeBills: Array.isArray(parsed.domesticFeeBills) ? parsed.domesticFeeBills : [],
+    participations: Array.isArray(parsed.participations) ? parsed.participations : [],
+    purchaseVouchers: Array.isArray(parsed.purchaseVouchers) ? parsed.purchaseVouchers : [],
+    exceptions: Array.isArray(parsed.exceptions) ? parsed.exceptions : [],
+    eventSubmissions: Array.isArray(parsed.eventSubmissions) ? parsed.eventSubmissions : [],
+    drafts: Array.isArray(parsed.drafts) ? parsed.drafts : [],
   }
 }

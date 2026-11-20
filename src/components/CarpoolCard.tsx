@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { useAppStore } from '../store'
 import type { Carpool } from '../types'
 import { formatDateTime, money, navigate } from '../utils'
+import { isOpenForOccupancy } from '../lib/share'
 import { Avatar, Button, Card, ProgressBar, StatusBadge } from './UI'
 
 export function CarpoolCard({ carpool, compact = false, extraAction }: { carpool: Carpool; compact?: boolean; extraAction?: ReactNode }) {
@@ -53,9 +54,9 @@ export function CarpoolCard({ carpool, compact = false, extraAction }: { carpool
           <p className="mt-0.5 text-[11px] text-muted">{formatDateTime(carpool.deadline)} 截单</p>
         </div>
         <div className="flex items-center gap-3">
-          {carpool.status === 'recruiting' && <span className="hidden text-xs font-semibold text-success sm:inline">剩 {remaining} 位</span>}
+          {isOpenForOccupancy(carpool) && <span className="hidden text-xs font-semibold text-success sm:inline">剩 {remaining} 份</span>}
           {extraAction}
-          <Button size="sm" variant={carpool.status === 'recruiting' ? 'secondary' : 'ghost'} onClick={() => navigate(`/detail/${carpool.id}`)}>
+          <Button size="sm" variant={isOpenForOccupancy(carpool) ? 'secondary' : 'ghost'} onClick={() => navigate(`/detail/${carpool.id}`)}>
             查看详情 <span aria-hidden="true">→</span>
           </Button>
         </div>

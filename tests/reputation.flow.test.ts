@@ -276,7 +276,7 @@ section('13. 刷新网页后信誉记录和处理状态仍然存在')
 section('14. 原有拼车、群聊、物流与地址功能仍然可用')
 {
   const fresh = createInitialData()
-  check('预置拼车数量不变', fresh.carpools.length === 4)
+  check('预置拼车数量不变（4 辆历史 + 3 辆 V2.0）', fresh.carpools.length === 7)
   check('预置群聊仍然存在', fresh.chats.some((chat) => chat.carpoolId === 'car-plush'))
   check('国际物流仍然可以查看', fresh.internationalShipments.some((item) => item.carpoolId === 'car-plush'))
   check('地址簿仍然保留', fresh.savedAddresses.length === 5)

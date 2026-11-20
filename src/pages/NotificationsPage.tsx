@@ -1,13 +1,16 @@
 import { Button, Card, EmptyState, PageHeader } from '../components/UI'
 import { useAppStore } from '../store'
 import type { Notification } from '../types'
-import { formatFullDateTime, navigate, notificationTypeText } from '../utils'
+import { formatFullDateTime, getRoute, navigate, notificationTypeText } from '../utils'
 
 export function NotificationsPage() {
   const { data, currentUser, markNotificationRead, markAllNotificationsRead } = useAppStore()
-  const list = data.notifications
+  const logisticsOnly = getRoute().searchParams.get('tab') === 'logistics'
+  const logisticsTypes: Notification['type'][] = ['address_required', 'address_urge', 'arrival_checked', 'domestic_shipped']
+  const all = data.notifications
     .filter((item) => item.userId === currentUser.id)
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+  const list = logisticsOnly ? all.filter((item) => logisticsTypes.includes(item.type)) : all
   const unread = list.filter((item) => !item.read).length
 
   const open = (notification: Notification) => {
@@ -28,10 +31,17 @@ export function NotificationsPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Notifications"
-        title="站内通知"
-        description="物流、地址、投诉、扣分与申诉结果都会出现在这里，点击可以直接跳转到对应页面。"
-        action={unread > 0 ? <Button variant="secondary" onClick={markAllNotificationsRead}>全部标为已读</Button> : undefined}
+        eyebrow={logisticsOnly ? 'Logistics Messages' : 'Notifications'}
+        title={logisticsOnly ? '物流消息' : '系统通知'}
+        description={logisticsOnly
+          ? '仅展示地址收集、到货检查与国内发货进度，点击可进入对应履约页面。'
+          : '截团、规则、物流、投诉、扣分与申诉结果都会出现在这里。'}
+        action={(
+          <div className="flex flex-wrap gap-2">
+            {logisticsOnly && <Button variant="ghost" onClick={() => navigate('/notifications')}>查看全部通知</Button>}
+            {unread > 0 && <Button variant="secondary" onClick={markAllNotificationsRead}>全部标为已读</Button>}
+          </div>
+        )}
       />
 
       {list.length ? (

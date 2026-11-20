@@ -4,16 +4,21 @@ import { navigate } from '../utils'
 import { Avatar, Button, cn } from './UI'
 import { useToast } from './Toast'
 
+/**
+ * V2.0 一级导航：拼车广场 / 车主管理 / 消息 / 个人中心。
+ * 发起拼车只在活动页面提供入口；个人资料、地址簿、通知与信誉收纳到右上角账号菜单中。
+ */
 const baseNavItems = [
   { label: '拼车广场', path: '/' },
-  { label: '发起拼车', path: '/create' },
-  { label: '我的拼车', path: '/mine' },
   { label: '车主管理', path: '/manage' },
+  { label: '消息', path: '/messages' },
   { label: '个人中心', path: '/profile' },
 ]
 
 function isActive(pathname: string, itemPath: string) {
-  if (itemPath === '/') return pathname === '/' || pathname.startsWith('/detail/')
+  if (itemPath === '/') {
+    return pathname === '/' || pathname.startsWith('/detail/') || pathname.startsWith('/create') || pathname.startsWith('/event/')
+  }
   return pathname === itemPath || pathname.startsWith(`${itemPath}/`)
 }
 
@@ -157,6 +162,27 @@ export function Layout({ pathname, children }: { pathname: string; children: Rea
                   </button>
                   <button
                     role="menuitem"
+                    onClick={() => { setAccountOpen(false); navigate('/profile') }}
+                    className="flex w-full items-center justify-between rounded-xl px-2.5 py-2 text-left text-sm font-semibold text-ink transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-purple-100"
+                  >
+                    个人中心
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={() => { setAccountOpen(false); navigate('/mine') }}
+                    className="flex w-full items-center justify-between rounded-xl px-2.5 py-2 text-left text-sm font-semibold text-ink transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-purple-100"
+                  >
+                    我参与的
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={() => { setAccountOpen(false); navigate('/manage') }}
+                    className="flex w-full items-center justify-between rounded-xl px-2.5 py-2 text-left text-sm font-semibold text-ink transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-purple-100"
+                  >
+                    车主管理
+                  </button>
+                  <button
+                    role="menuitem"
                     onClick={() => { setAccountOpen(false); navigate('/reputation') }}
                     className="flex w-full items-center rounded-xl px-2.5 py-2 text-left text-sm font-semibold text-ink transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-purple-100"
                   >
@@ -214,6 +240,19 @@ export function Layout({ pathname, children }: { pathname: string; children: Rea
       <footer className="mx-auto mt-6 max-w-7xl border-t border-slate-200 px-4 py-8 text-center text-xs leading-5 text-muted sm:px-6 lg:px-8">
         课程演示项目 · 所有拼车与支付数据均为本地模拟，不代表真实活动信息
       </footer>
+    </div>
+  )
+}
+
+/** 旧路由重定向：避免形成第二套入口 */
+export function Redirect({ to }: { to: string }) {
+  useEffect(() => {
+    navigate(to)
+  }, [to])
+  return (
+    <div className="mx-auto flex min-h-[40vh] max-w-lg flex-col items-center justify-center text-center">
+      <p className="text-sm text-muted">正在跳转…</p>
+      <Button className="mt-5" onClick={() => navigate(to)}>立即前往</Button>
     </div>
   )
 }

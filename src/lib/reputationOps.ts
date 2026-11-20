@@ -190,7 +190,9 @@ export function checkCreatePermission(data: AppData, userId: string) {
 export function checkJoinPermission(data: AppData, userId: string, carpoolId: string) {
   const carpool = data.carpools.find((item) => item.id === carpoolId)
   if (!carpool) return { ok: false, message: '没有找到这辆拼车，请返回广场重试。', permissions: null }
-  if (carpool.status !== 'recruiting') return { ok: false, message: '这辆拼车已经停止招募。', permissions: null }
+  if (carpool.status !== 'recruiting') {
+    return { ok: false, message: '这辆拼车已经停止招募。', permissions: null }
+  }
   if (carpool.ownerId === userId) return { ok: false, message: '车主不能加入自己发起的拼车。', permissions: null }
   const permissions = permissionsOf(scoreFromEvents(data.reputationEvents, userId))
   return {
@@ -198,6 +200,38 @@ export function checkJoinPermission(data: AppData, userId: string, carpoolId: st
     message: permissions.canJoin ? '' : permissions.reason,
     permissions,
   }
+}
+
+/**
+ * V1.3-A.1 购买权限校验：首次购买与加购走完全相同的规则。
+ * - 招募中 / 待确认成团：允许购买剩余份额（待确认成团时确认成团会重新校验成团条件）
+ * - 已成团 / 已下单 / 已关闭：禁止新增购买
+ * - 信誉分需 ≥ 60，车主为自己购买份额同样受限，限制无法绕过
+ */
+export function checkPurchasePermission(data: AppData, userId: string, carpoolId: string) {
+  const carpool = data.carpools.find((item) => item.id === carpoolId)
+  if (!carpool) return { ok: false, message: '没有找到这辆拼车，请返回广场重试。', permissions: null }
+  if (carpool.status !== 'recruiting') {
+    const reason = carpool.status === 'cut'
+      ? '这辆拼车已经截团，不能再购买份额。'
+      : carpool.status === 'purchasing'
+        ? '这辆拼车已经进入采购履约阶段，不能再购买份额。'
+        : carpool.status === 'failed'
+          ? '这辆拼车已经流团，不能再购买份额。'
+          : carpool.status === 'expired'
+            ? '这辆拼车的招募截止时间已到，正在等待车主处理，暂时不能购买份额。'
+            : '这辆拼车已经结束，不能再购买份额。'
+    return { ok: false, message: reason, permissions: null }
+  }
+  const permissions = permissionsOf(scoreFromEvents(data.reputationEvents, userId))
+  if (!permissions.canJoin) {
+    return {
+      ok: false,
+      message: permissions.reason,
+      permissions,
+    }
+  }
+  return { ok: true, message: '', permissions }
 }
 
 /**
@@ -268,13 +302,15 @@ export function completeRiderOrderOp(data: AppData, userId: string, carpoolId: s
   const timestamp = at ?? now()
   const carpool = data.carpools.find((item) => item.id === carpoolId)
   if (!carpool) return fail('没有找到这辆拼车。', data)
-  const isRider = carpool.positions.some((slot) => slot.occupantId === userId)
+  // 车主自留的份额不算车员，不能领取车员履约奖励
+  const isRider = carpool.positions.some((slot) => slot.occupantId === userId && slot.occupantId !== carpool.ownerId)
   if (!isRider) return fail('只有本车车员可以确认收货。', data)
 
-  const order = data.orders.find((item) => item.carpoolId === carpoolId && item.userId === userId)
-  if (!order) return fail('没有找到你在本车的订单。', data)
-  if (order.fulfillmentStatus === 'completed') {
-    return fail('这笔订单已经完成履约，信誉奖励不会重复发放。', data)
+  // 同一车员在同一车次可能有多笔订单（例如额外承接空位），需要一起完成
+  const myOrders = data.orders.filter((item) => item.carpoolId === carpoolId && item.userId === userId)
+  if (!myOrders.length) return fail('没有找到你在本车的订单。', data)
+  if (myOrders.every((item) => item.fulfillmentStatus === 'completed')) {
+    return fail('这些订单已经完成履约，信誉奖励不会重复发放。', data)
   }
 
   const domestic = data.domesticShipments.find((item) => item.carpoolId === carpoolId && item.userId === userId)
@@ -297,7 +333,7 @@ export function completeRiderOrderOp(data: AppData, userId: string, carpoolId: s
   const next: AppData = {
     ...recorded.data,
     orders: recorded.data.orders.map((item) => (
-      item.id === order.id
+      item.carpoolId === carpoolId && item.userId === userId && item.fulfillmentStatus !== 'completed'
         ? { ...item, fulfillmentStatus: 'completed' as const, fulfilledAt: timestamp }
         : item
     )),
@@ -319,7 +355,9 @@ export function completeOwnerFulfillmentOp(data: AppData, ownerId: string, carpo
   if (!carpool) return fail('没有找到这辆拼车。', data)
   if (carpool.ownerId !== ownerId) return fail('只有车主可以确认整车履约完成。', data)
   if (carpool.fulfilledAt) return fail('本车已经完成履约，信誉奖励不会重复发放。', data)
-  if (carpool.status === 'recruiting') return fail('车次还没有拼成，暂时不能确认履约完成。', data)
+  if (carpool.status === 'recruiting') {
+    return fail('车次还没有截团，暂时不能确认履约完成。', data)
+  }
 
   const riderOrders = data.orders.filter((order) => order.carpoolId === carpoolId && order.userId !== ownerId)
   const pending = riderOrders.filter((order) => order.fulfillmentStatus !== 'completed')

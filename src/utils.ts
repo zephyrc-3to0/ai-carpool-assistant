@@ -29,8 +29,11 @@ export function formatFullDateTime(value: string) {
 
 export const statusText: Record<CarpoolStatus, string> = {
   recruiting: '招募中',
-  formed: '已拼成',
-  closed: '已结束',
+  expired: '招募已截止',
+  cut: '已截团',
+  purchasing: '采购履约中',
+  completed: '已完成',
+  failed: '已流团',
 }
 
 export const internationalStatusText: Record<InternationalStatus, string> = {
@@ -52,8 +55,8 @@ export const internationalStatusOrder: InternationalStatus[] = [
   'checked',
 ]
 
-/** 会触发地址收集的运输状态 */
-export const collectionTriggerStatuses: InternationalStatus[] = ['in_transit', 'customs', 'domestic_transit']
+/** 清关完成后会触发地址收集的运输状态 */
+export const collectionTriggerStatuses: InternationalStatus[] = ['domestic_transit', 'received', 'checked']
 
 export const addressStatusText: Record<AddressStatus, string> = {
   pending: '待填写',
@@ -77,6 +80,13 @@ export const notificationTypeText: Record<NotificationType, string> = {
   reputation_penalty: '信誉扣分',
   appeal_result: '申诉结果',
   complaint_result: '投诉结果',
+  carpool_cut: '拼车截团',
+  carpool_expired: '招募截止',
+  recruitment_extended: '招募延期',
+  carpool_failed: '拼车流团',
+  freight_bill: '国际运费',
+  rule_change: '规则变更',
+  slot_takeover: '空位承接',
 }
 
 /** 拼装完整地址文本 */
@@ -116,6 +126,10 @@ export function navigate(path: string) {
 }
 
 export function getRoute() {
+  // 服务端渲染（如冒烟测试）时没有 window，返回默认路由
+  if (typeof window === 'undefined') {
+    return { pathname: '/', searchParams: new URLSearchParams() }
+  }
   const raw = window.location.hash.replace(/^#/, '') || '/'
   const [pathname, search = ''] = raw.split('?')
   return { pathname, searchParams: new URLSearchParams(search) }

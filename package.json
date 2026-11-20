@@ -9,8 +9,11 @@
     "preview": "vite preview --host 0.0.0.0",
     "test": "esbuild tests/logistics.flow.test.ts --bundle --platform=node --format=esm --outfile=.tmp-test/flow.mjs --log-level=warning && node .tmp-test/flow.mjs",
     "test:reputation": "esbuild tests/reputation.flow.test.ts --bundle --platform=node --format=esm --outfile=.tmp-test/reputation.mjs --log-level=warning && node .tmp-test/reputation.mjs",
+    "test:share": "esbuild tests/share.flow.test.ts --bundle --platform=node --format=esm --outfile=.tmp-test/share.mjs --log-level=warning && node .tmp-test/share.mjs",
+    "test:ia": "esbuild tests/ia.flow.test.ts --bundle --platform=node --format=esm --outfile=.tmp-test/ia.mjs --log-level=warning && node .tmp-test/ia.mjs",
+    "test:v2": "esbuild tests/v2.flow.test.ts --bundle --platform=node --format=esm --outfile=.tmp-test/v2.mjs --log-level=warning && node .tmp-test/v2.mjs",
     "test:render": "esbuild tests/render.smoke.test.tsx --bundle --platform=node --format=cjs --jsx=automatic --outfile=.tmp-test/render.cjs --log-level=warning && node .tmp-test/render.cjs",
-    "test:all": "npm test && npm run test:reputation && npm run test:render"
+    "test:all": "npm test && npm run test:reputation && npm run test:share && npm run test:v2 && npm run test:ia && npm run test:render"
   },
   "dependencies": {
     "react": "^18.3.1",

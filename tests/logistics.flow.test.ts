@@ -93,7 +93,7 @@ section('1. 个人中心新增地址并设置默认地址')
   check('不能删除其他账号的地址', !crossDelete.ok)
 }
 
-section('2-3. 车主录入国际物流并更新为「国际运输中」')
+section('2-3. 车主录入国际物流，清关完成后开启地址收集')
 {
   const enter = updateInternationalShipmentOp(data, OWNER, 'car-plush', {
     carrier: 'DHL Express',
@@ -104,8 +104,8 @@ section('2-3. 车主录入国际物流并更新为「国际运输中」')
   })
   data = enter.next
   check('车主可以更新国际物流状态', enter.ok)
-  check('地址收集被自动开启', data.carpools.find((c) => c.id === 'car-plush')?.addressCollection?.enabled === true)
-  check('三位车员都生成了待填写记录', data.orderAddresses.filter((a) => a.carpoolId === 'car-plush' && a.status === 'pending').length === 3)
+  check('国际运输中不开启地址收集', data.carpools.find((c) => c.id === 'car-plush')?.addressCollection?.enabled !== true)
+  check('国际运输中不生成待填写记录', data.orderAddresses.filter((a) => a.carpoolId === 'car-plush' && a.status === 'pending').length === 0)
 
   const notOwner = updateInternationalShipmentOp(data, RIDER_BOOK, 'car-plush', {
     carrier: 'X', trackingNumber: 'Y', trackingUrl: '', status: 'customs', note: '',
@@ -116,12 +116,23 @@ section('2-3. 车主录入国际物流并更新为「国际运输中」')
     carrier: 'DHL Express',
     trackingNumber: 'JD014600008821',
     trackingUrl: 'https://www.dhl.com/cn/zh/home/tracking',
-    status: 'customs',
-    note: '已抵达转运中心。',
+    status: 'domestic_transit',
+    note: '已清关，进入国内运输。',
   })
   data = again.next
+  check('清关完成后地址收集被自动开启', data.carpools.find((c) => c.id === 'car-plush')?.addressCollection?.enabled === true)
   const pendingRecords = data.orderAddresses.filter((a) => a.carpoolId === 'car-plush' && a.status === 'pending')
-  check('重复修改状态不会重复创建地址收集任务', pendingRecords.length === 3)
+  check('三位车员都生成了待填写记录', pendingRecords.length === 3)
+
+  const repeat = updateInternationalShipmentOp(data, OWNER, 'car-plush', {
+    carrier: 'DHL Express',
+    trackingNumber: 'JD014600008821',
+    trackingUrl: 'https://www.dhl.com/cn/zh/home/tracking',
+    status: 'domestic_transit',
+    note: '已清关，进入国内运输。',
+  })
+  data = repeat.next
+  check('重复修改状态不会重复创建地址收集任务', data.orderAddresses.filter((a) => a.carpoolId === 'car-plush' && a.status === 'pending').length === 3)
   check('物流时间线记录了状态变化', data.internationalShipments.find((s) => s.carpoolId === 'car-plush')?.timeline.length === 2)
 }
 
@@ -283,23 +294,48 @@ section('14. 刷新页面后数据仍然保留')
 section('15. 原有拼车、订单、群聊流程不受影响')
 {
   const fresh = createInitialData()
-  check('预置拼车数量不变', fresh.carpools.length === 4)
+  check('预置拼车数量不变（4 辆历史 + 3 辆 V2.0）', fresh.carpools.length === 7)
   check('V1 的 7 笔预置订单仍然存在', fresh.orders.filter((order) => order.id.startsWith('order-demo-') && !['order-demo-8', 'order-demo-9'].includes(order.id)).length === 7)
   check('预置群聊仍然存在', fresh.chats.some((chat) => chat.carpoolId === 'car-plush'))
-  check('车次状态仍然正确', fresh.carpools.find((c) => c.id === 'car-plush')?.status === 'formed')
+  check('车次状态仍然正确', fresh.carpools.find((c) => c.id === 'car-plush')?.status === 'cut')
 
+  // 模拟 V1 存量数据：完全没有 V1.1 / V1.2 / V1.3-A 的字段
   const legacy = normalizeData({
     version: 1,
     users: fresh.users,
     currentUserId: 'u-owner',
-    carpools: fresh.carpools.map((carpool) => ({ ...carpool, addressCollection: undefined })),
-    orders: fresh.orders,
+    carpools: fresh.carpools.map((carpool) => ({
+      ...carpool,
+      addressCollection: undefined,
+      purchaseMode: undefined,
+      shareGroups: undefined,
+      bundleSets: undefined,
+      guarantees: undefined,
+      feeRules: undefined,
+      rulesVersion: undefined,
+      fallbackRule: undefined,
+      positions: carpool.positions.map((slot) => ({ id: slot.id, label: slot.label, occupantId: slot.occupantId, orderId: slot.orderId })),
+    })),
+    orders: fresh.orders.map((order) => ({
+      id: order.id,
+      carpoolId: order.carpoolId,
+      userId: order.userId,
+      slotIds: order.slotIds,
+      amount: order.amount,
+      paidAt: order.paidAt,
+    })),
     chats: fresh.chats,
   } as unknown as AppData)
-  check('V1 存量数据可以平滑升级', legacy.version === 3 && legacy.carpools.length === 4)
+  check('V1 存量数据可以平滑升级', legacy.version === 7 && legacy.carpools.length === 7)
   check('升级后补齐了空的 V1.1 集合', legacy.savedAddresses.length === 0 && legacy.notifications.length === 0)
   check('升级后原有订单与群聊保持不变', legacy.orders.length === fresh.orders.length && legacy.chats.length === fresh.chats.length)
   check('升级后补齐了 V1.2 信誉集合', legacy.reputations.length === fresh.users.length && legacy.reputationEvents.length === 0)
+  // V1.3-A：存量数据补齐份额与快照字段，但不改变原有业务数据
+  check('旧车保持 legacy 平铺结构', legacy.carpools.every((carpool) => !carpool.shareGroups))
+  check('旧车补齐了份额单价', legacy.carpools.every((carpool) => carpool.positions.every((slot) => typeof slot.price === 'number')))
+  check('旧车补齐了未凑齐处理规则', legacy.carpools.every((carpool) => Boolean(carpool.fallbackRule)))
+  check('存量订单补齐了商品与费用快照', legacy.orders.every((order) => Boolean(order.itemSnapshot && order.feeSnapshot && order.rulesSnapshot)))
+  check('存量订单的商品快照不被覆盖', legacy.orders.find((order) => order.id === 'order-demo-5')?.itemSnapshot?.name === '成员角色玩偶挂件')
 }
 
 section('16. 预置演示数据自洽')
