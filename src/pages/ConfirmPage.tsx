@@ -1,10 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Avatar, Button, Card, EmptyState, InfoRow } from '../components/UI'
 import { useToast } from '../components/Toast'
 import { useAppStore } from '../store'
 import { formatFullDateTime, money, navigate } from '../utils'
 import { eventOf, groupOf, productsOf } from '../lib/catalog'
-import { guaranteeText, purchaseModeOf, purchaseModeText } from '../lib/share'
+import { guaranteeText, purchaseModeOf, purchaseModeText, slotPrice } from '../lib/share'
 import { formatCents } from '../lib/money'
 
 type DemoResult = 'success' | 'failure' | 'timeout'
@@ -16,10 +16,11 @@ type DemoResult = 'success' | 'failure' | 'timeout'
  * 首次购买只支付商品款，不在这里要求填写国内收货地址。
  */
 export function ConfirmPage({ carpoolId, slotIds }: { carpoolId: string; slotIds: string[] }) {
-  const { data, currentUser, reserveShares, confirmPayment, permissions } = useAppStore()
+  const { data, currentUser, purchaseShares, permissions } = useAppStore()
   const showToast = useToast()
   const [agreed, setAgreed] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const paymentInFlight = useRef(false)
   const [demoResult, setDemoResult] = useState<DemoResult>('success')
   const carpool = data.carpools.find((item) => item.id === carpoolId)
   const perm = permissions
@@ -39,7 +40,7 @@ export function ConfirmPage({ carpoolId, slotIds }: { carpoolId: string; slotIds
   const group = groupOf(data, carpool.groupId)
   const isOwner = carpool.ownerId === currentUser.id
   const quantity = slots.length
-  const goodsTotal = slots.reduce((sum, slot) => sum + (slot.price ?? carpool.price ?? 0), 0)
+  const goodsTotal = slots.reduce((sum, slot) => sum + slotPrice(carpool, slot), 0)
 
   if (isOwner) {
     return (
@@ -75,19 +76,15 @@ export function ConfirmPage({ carpoolId, slotIds }: { carpoolId: string; slotIds
       showToast('请先阅读并确认本次购买的商品、费用与交易规则。', 'error')
       return
     }
+    if (paymentInFlight.current) return
+    paymentInFlight.current = true
     setSubmitting(true)
     window.setTimeout(() => {
-      const reserved = reserveShares(carpool.id, slotIds)
-      if (!reserved.ok || !reserved.data) {
-        setSubmitting(false)
-        showToast(reserved.message, 'error')
-        navigate(`/detail/${carpool.id}`)
-        return
-      }
-      const result = confirmPayment(carpool.id, reserved.data.reservationId, {
+      const result = purchaseShares(carpool.id, slotIds, {
         simulateFailure: demoResult === 'failure',
         simulateTimeout: demoResult === 'timeout',
       })
+      paymentInFlight.current = false
       setSubmitting(false)
       if (!result.ok) {
         showToast(result.message, 'error')
@@ -135,16 +132,15 @@ export function ConfirmPage({ carpoolId, slotIds }: { carpoolId: string; slotIds
                   const groupItem = (carpool.shareGroups ?? []).find((entry) => entry.slotIds.includes(slot.id))
                   const product = productsOf(data, carpool.eventId).find((item) => item.id === groupItem?.productId)
                   const title = product ? `${product.name} · ${product.spec}` : (groupItem?.name ?? slot.label)
-                  const member = groupItem?.member
                   return (
                     <div key={slot.id} className="flex items-center justify-between gap-3 rounded-xl border border-purple-200 bg-purple-50 px-3.5 py-3">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-bold text-primaryDark">{title}</p>
                         <p className="mt-0.5 truncate text-[11px] text-primary/75">
-                          成员位置：{member ?? slot.label} · 数量 1
+                          成员位置：{slot.label} · 数量 1
                         </p>
                       </div>
-                      <span className="flex-none text-sm font-semibold text-ink">{money(slot.price ?? carpool.price)}</span>
+                      <span className="flex-none text-sm font-semibold text-ink">{money(slotPrice(carpool, slot))}</span>
                     </div>
                   )
                 })}

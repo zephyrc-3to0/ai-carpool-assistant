@@ -482,6 +482,25 @@ export function confirmOrderOp(
   return done(message, finalData, order)
 }
 
+/**
+ * ConfirmPage 的一次性「预留 → 模拟付款」事务。
+ * 付款阶段直接读取本次 reserveSlotsOp 返回的 next，避免 React 状态尚未刷新时
+ * confirmOrderOp 读到预留前的旧数据。
+ */
+export function purchaseSharesOp(
+  data: AppData,
+  userId: string,
+  carpoolId: string,
+  slotIds: string[],
+  options: ConfirmOrderOptions = {},
+): OpResult<Order> {
+  const reserved = reserveSlotsOp(data, userId, carpoolId, slotIds)
+  if (!reserved.ok || !reserved.data) {
+    return fail(reserved.message, reserved.next)
+  }
+  return confirmOrderOp(reserved.next, userId, carpoolId, reserved.data.reservationId, options)
+}
+
 // ---------------------------------------------------------------------------
 // 采购状态机（V2.0：截团由 src/lib/recruitOps.ts 负责）
 // ---------------------------------------------------------------------------

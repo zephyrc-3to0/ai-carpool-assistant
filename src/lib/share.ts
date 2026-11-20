@@ -220,16 +220,17 @@ export function buildItemSnapshot(carpool: Carpool, slotIds: string[]): OrderIte
   }
 }
 
-/** 构造订单费用快照 */
+/** 构造订单费用快照：多选时逐份按实际价格加总 */
 export function buildFeeSnapshot(carpool: Carpool, slotIds: string[]): OrderFeeSnapshot {
   const feeRules: FeeRules = carpool.feeRules ?? defaultFeeRules(carpool.price)
   const slots = carpool.positions.filter((slot) => slotIds.includes(slot.id))
   const unitPrice = slots.length ? slotPrice(carpool, slots[0]) : feeRules.unitPrice
   const quantity = slots.length
+  const goodsTotal = slots.reduce((sum, slot) => sum + slotPrice(carpool, slot), 0)
   const serviceFee = feeRules.serviceFee
   const shippingFee = feeRules.shippingFee
-  const total = unitPrice * quantity + serviceFee + shippingFee
-  return { unitPrice, quantity, serviceFee, shippingFee, total }
+  const total = goodsTotal + serviceFee + shippingFee
+  return { unitPrice, quantity, goodsTotal, serviceFee, shippingFee, total }
 }
 
 /** 构造订单规则快照 */

@@ -107,18 +107,28 @@ export function ParticipationPage({ carpoolId }: { carpoolId: string }) {
                 {allOrders.map((order) => {
                   const payment = goodsPayments.find((item) => item.refId === order.id)
                   const refund = refunds.find((item) => item.refId === order.id)
+                  const positionLabels = order.itemSnapshot?.slotLabels?.length
+                    ? order.itemSnapshot.slotLabels
+                    : carpool.positions.filter((slot) => order.slotIds.includes(slot.id)).map((slot) => slot.label)
                   return (
                     <div key={order.id} className="py-3 first:pt-0">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <span className="text-sm font-bold text-ink">{order.itemSnapshot ? participationItemLabel({ ...order.itemSnapshot, quantity: order.itemSnapshot.quantity, unitPrice: order.itemSnapshot.unitPrice, amount: 0, labels: [] }) : '商品款'} ×{order.itemSnapshot?.quantity ?? order.slotIds.length}</span>
                         <span className="text-sm font-semibold text-ink">{money(order.amount)}</span>
                       </div>
+                      {positionLabels.length > 0 && (
+                        <p className="mt-1 text-[11px] text-primary/75">成员位置：{positionLabels.join('、')}</p>
+                      )}
                       <p className="mt-1 text-[11px] text-muted">
                         {formatFullDateTime(order.paidAt)} 下单
                         {payment ? ` · 商品款模拟支付 ${formatCents(payment.amountCents)}` : ''}
-                        {refund ? ` · 已生成退款 ${formatCents(refund.amountCents)}` : ''}
                         {order.fulfillmentStatus === 'completed' ? ' · 已确认收货' : ''}
                       </p>
+                      {refund && (
+                        <p className="mt-1.5 rounded-lg bg-successSoft px-2.5 py-1.5 text-[11px] font-semibold text-success">
+                          退款结果：已生成模拟退款 {formatCents(refund.amountCents)}
+                        </p>
+                      )}
                     </div>
                   )
                 })}

@@ -191,6 +191,8 @@ export interface OrderItemSnapshot {
 export interface OrderFeeSnapshot {
   unitPrice: number
   quantity: number
+  /** 商品款实际合计；旧订单缺失时按 unitPrice × quantity 兼容读取 */
+  goodsTotal?: number
   serviceFee: number
   shippingFee: number
   total: number

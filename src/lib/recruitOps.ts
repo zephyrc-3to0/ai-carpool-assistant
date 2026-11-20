@@ -5,7 +5,7 @@
  * - 有效占用 = 车员付款成功的份额 + 车主已确认的自购份额
  * - 整套凑套：全部开放份数被有效占用时自动截团，不需要车主手动截团
  * - 普通拼邮：按「最低金额 × 包裹件数」四种情况处理
- * - 车主自购不产生模拟付款交易；流团只对真实存在的模拟支付生成退款
+ * - 车主自购不产生模拟付款交易；流团按已付款车员订单逐笔关联退款
  */
 import type {
   AppData,
@@ -489,7 +489,8 @@ export function extendRecruitmentOp(data: AppData, ownerId: string, carpoolId: s
 
 /**
  * 流团：未成团且未延期（或已达最晚截团时间）时处理。
- * 只对真实存在的模拟支付记录生成退款；车主自购不产生退款交易。
+ * 为每笔已付款车员订单生成一笔关联退款：优先使用商品支付流水金额，
+ * 旧订单缺少流水时回退到订单实付金额；车主自购不退款，已关联退款不重复生成。
  * 已经是流团状态的车次不会重复生成退款。
  */
 export function failCarpoolOp(data: AppData, ownerId: string, carpoolId: string, reason = ''): OpResult<PaymentRecord[]> {
@@ -499,31 +500,47 @@ export function failCarpoolOp(data: AppData, ownerId: string, carpoolId: string,
   if (carpool.status !== 'recruiting' && carpool.status !== 'expired') return fail('该车次已经结束招募。', data)
 
   const timestamp = now()
-  const riderOrders = data.orders.filter((order) => order.carpoolId === carpoolId && order.userId !== carpool.ownerId)
-  const refundedRefs = new Set(
+  const riderOrders = data.orders.filter((order) => (
+    order.carpoolId === carpoolId
+    && order.userId !== carpool.ownerId
+    && !order.ownerHeld
+    && Boolean(order.paidAt)
+  ))
+  const refundedOrderIds = new Set(
     (data.payments ?? [])
       .filter((payment) => payment.carpoolId === carpoolId && payment.kind === 'refund')
       .map((payment) => payment.refId)
       .filter((refId): refId is string => Boolean(refId)),
   )
-  const goodsPayments = (data.payments ?? []).filter(
-    (payment) => payment.carpoolId === carpoolId
+  const goodsPaymentByOrder = new Map<string, PaymentRecord>()
+  for (const payment of data.payments ?? []) {
+    if (
+      payment.carpoolId === carpoolId
       && payment.kind === 'goods'
       && payment.status === 'paid'
-      // 已经生成过退款的商品款不会再次退款，避免重复退款
-      && !(payment.refId && refundedRefs.has(payment.refId)),
-  )
-  const refunds: PaymentRecord[] = goodsPayments.map((payment) => ({
-    id: uid('pay'),
-    carpoolId,
-    userId: payment.userId,
-    kind: 'refund',
-    amountCents: payment.amountCents,
-    status: 'paid',
-    refId: payment.refId,
-    note: reason || '未成团，已生成模拟退款记录。',
-    createdAt: timestamp,
-  }))
+      && payment.refId
+      && !goodsPaymentByOrder.has(payment.refId)
+    ) {
+      goodsPaymentByOrder.set(payment.refId, payment)
+    }
+  }
+  const refunds: PaymentRecord[] = riderOrders
+    .filter((order) => !refundedOrderIds.has(order.id))
+    .map((order) => {
+      const goodsPayment = goodsPaymentByOrder.get(order.id)
+      return {
+        id: uid('pay'),
+        carpoolId,
+        userId: order.userId,
+        kind: 'refund' as const,
+        // 新订单优先按关联支付流水退款；旧订单没有流水时回退到订单实付金额。
+        amountCents: goodsPayment?.amountCents ?? Math.round(order.amount * 100),
+        status: 'refunded' as const,
+        refId: order.id,
+        note: reason || '未成团，已生成模拟退款记录。',
+        createdAt: timestamp,
+      }
+    })
 
   const riders = [...new Set(riderOrders.map((order) => order.userId))]
 
@@ -572,7 +589,7 @@ export interface ExpiredCarpoolReport {
  *
  * 1. 招募截止时间（车主自设）到达且仍未成团 → 进入「等待车主处理」状态，
  *    车主仍可在平台最晚允许截团时间之前延期，或手动结束流团。
- * 2. 平台最晚允许截团时间到达仍未成团 → 自动流团，并只对真实模拟支付生成退款。
+ * 2. 平台最晚允许截团时间到达仍未成团 → 自动流团，并按已付款车员订单逐笔生成退款。
  * 3. 已截团 / 采购履约中 / 已完成 / 已流团的车次不受截止时间影响。
  *
  * 没有活动上下文的历史车次没有最晚截团时间，到达截止时间后直接流团，

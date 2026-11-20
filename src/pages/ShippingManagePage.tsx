@@ -337,11 +337,15 @@ export function ShippingManagePage({ carpoolId }: { carpoolId: string }) {
               <div className="space-y-4">
                 {riders.map((rider) => {
                   const form = domesticForms[rider.id] ?? { carrier: '', trackingNumber: '', shippedAt: '', note: '' }
+                  const domesticRecord = getDomesticShipment(data, carpoolId, rider.id)
                   const domesticStatus = deriveDomesticStatus(data, carpoolId, rider.id)
                   const address = getOrderAddress(data, carpoolId, rider.id)
                   const feeBill = (data.domesticFeeBills ?? []).find((item) => item.carpoolId === carpoolId && item.userId === rider.id)
                   const feeForm = feeForms[rider.id] ?? { packingFee: '', shippingFee: '' }
-                  const canShip = address?.status === 'submitted' && (!carpool.requiresDomesticFee || feeBill?.status === 'paid')
+                  const alreadyShipped = domesticRecord?.status === 'shipped' || domesticRecord?.status === 'received'
+                  const requiresFeeSettlement = Boolean(carpool.requiresDomesticFee || feeBill)
+                  const canFirstShip = address?.status === 'submitted' && (!requiresFeeSettlement || feeBill?.status === 'paid')
+                  const canSaveShipment = alreadyShipped || canFirstShip
                   return (
                     <div key={rider.id} className="rounded-2xl border border-slate-200 bg-slate-50/50 p-4 sm:p-5">
                       <div className="flex flex-wrap items-center gap-3">
@@ -380,13 +384,15 @@ export function ShippingManagePage({ carpoolId }: { carpoolId: string }) {
                         {address?.status !== 'submitted' && <p className="mt-2 text-[11px] text-muted">车员提交地址后才能登记费用。</p>}
                       </div>
 
-                      {!canShip && (
+                      {!alreadyShipped && !canFirstShip && (
                         <p className="mt-3 rounded-xl border border-danger/20 bg-dangerSoft px-3 py-2 text-xs leading-5 text-danger">
                           {address?.status !== 'submitted'
-                            ? '该车员尚未提交有效收货地址，暂不能发货。'
+                            ? '该车员尚未提交有效收货地址，暂不能首次发货。'
                             : feeBill?.status === 'disputed'
-                              ? '该车员的国内费用存在异议，处理完成后才能发货。'
-                              : '该车员尚未完成国内费用模拟支付，暂不能发货。'}
+                              ? '该车员的国内费用存在异议，处理完成后才能首次发货。'
+                              : !feeBill && carpool.requiresDomesticFee
+                                ? '请先为该车员登记国内费用，结清后才能首次发货。'
+                                : '该车员尚未完成国内费用模拟支付，结清后才能首次发货。'}
                         </p>
                       )}
 
@@ -410,7 +416,7 @@ export function ShippingManagePage({ carpoolId }: { carpoolId: string }) {
                       </div>
 
                       <div className="mt-4 flex flex-wrap items-center gap-2">
-                        <Button size="sm" disabled={!canShip && domesticStatus !== 'shipped' && domesticStatus !== 'received'} onClick={() => saveDomestic(rider.id)}>保存发货信息</Button>
+                        <Button size="sm" disabled={!canSaveShipment} onClick={() => saveDomestic(rider.id)}>保存发货信息</Button>
                         <Button size="sm" variant="secondary" disabled={domesticStatus !== 'shipped'} onClick={() => markReceived(rider.id)}>标记已签收</Button>
                         {domesticStatus === 'shipped' && <span className="text-[11px] text-muted">该车员已收到发货通知。</span>}
                       </div>

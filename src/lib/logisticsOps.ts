@@ -436,6 +436,9 @@ export function saveDomesticShipmentOp(
   let status: DomesticStatus
   if (input.status) {
     status = input.status
+  } else if (existing?.status === 'received') {
+    // 已签收历史记录在编辑备注时不得被重新降级为已发货。
+    status = 'received'
   } else if (carrier && trackingNumber) {
     status = 'shipped'
   } else if (carrier) {
@@ -446,16 +449,18 @@ export function saveDomesticShipmentOp(
   if ((status === 'shipped' || status === 'received') && (!carrier || !trackingNumber)) {
     return fail('填写快递公司和快递单号后，才能标记为已发货。', data)
   }
-  if (status === 'shipped' && address?.status !== 'submitted') {
+  const isFirstShipment = status === 'shipped' && existing?.status !== 'shipped' && existing?.status !== 'received'
+  if (isFirstShipment && address?.status !== 'submitted') {
     return fail('该车员还没有提交有效收货地址，不能标记为已发货。', data)
   }
-  if (status === 'shipped' && carpool.requiresDomesticFee) {
-    const feeBill = (data.domesticFeeBills ?? []).find((item) => item.carpoolId === carpoolId && item.userId === userId)
+  const feeBill = (data.domesticFeeBills ?? []).find((item) => item.carpoolId === carpoolId && item.userId === userId)
+  // 新车必须先登记费用；旧车一旦登记了费用，也必须等账单结清后才能首次发货。
+  if (isFirstShipment && (carpool.requiresDomesticFee || feeBill)) {
     if (!feeBill) return fail('请先为该车员登记国内打包费和国内运费。', data)
     if (feeBill.status === 'disputed') return fail('该车员的国内费用仍有异议，处理完成后才能发货。', data)
     if (feeBill.status !== 'paid') return fail('该车员还没有完成国内费用模拟支付，暂不能发货。', data)
   }
-  if (status === 'received' && existing?.status !== 'shipped') {
+  if (status === 'received' && existing?.status !== 'shipped' && existing?.status !== 'received') {
     return fail('请先把该车员的订单标记为已发货，再标记签收。', data)
   }
 
@@ -470,7 +475,7 @@ export function saveDomesticShipmentOp(
     status,
     updatedAt: timestamp,
   }
-  const shouldNotify = status === 'shipped' && existing?.status !== 'shipped' && existing?.status !== 'received'
+  const shouldNotify = isFirstShipment
   const user = data.users.find((item) => item.id === userId)
 
   const next: AppData = {

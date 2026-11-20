@@ -95,6 +95,7 @@ export function participationOf(data: AppData, carpoolId: string, userId: string
     const fee = order.feeSnapshot
     const quantity = snapshot?.quantity ?? order.slotIds.length
     const unitPrice = snapshot?.unitPrice ?? (fee?.unitPrice ?? order.amount)
+    const goodsAmount = fee?.goodsTotal ?? unitPrice * quantity
     const labels = snapshot?.slotLabels ?? []
 
     const key = [
@@ -107,7 +108,7 @@ export function participationOf(data: AppData, carpoolId: string, userId: string
     const existing = itemMap.get(key)
     if (existing) {
       existing.quantity += quantity
-      existing.amount += unitPrice * quantity
+      existing.amount += goodsAmount
       existing.labels = [...existing.labels, ...labels]
     } else {
       itemMap.set(key, {
@@ -116,13 +117,13 @@ export function participationOf(data: AppData, carpoolId: string, userId: string
         version: snapshot?.version,
         quantity,
         unitPrice,
-        amount: unitPrice * quantity,
+        amount: goodsAmount,
         labels: [...labels],
       })
     }
 
     summary.totalQuantity += quantity
-    summary.goodsAmount += unitPrice * quantity
+    summary.goodsAmount += goodsAmount
     summary.serviceFee += fee?.serviceFee ?? 0
     summary.shippingFee += fee?.shippingFee ?? 0
     summary.paidAmount += order.amount
@@ -135,9 +136,9 @@ export function participationOf(data: AppData, carpoolId: string, userId: string
     (slot) => slot.reservation?.userId === userId && isReservationAlive(slot),
   )
   if (reserved.length) {
-    const unitPrice = slotPrice(carpool, reserved[0])
+    const goodsTotal = reserved.reduce((sum, slot) => sum + slotPrice(carpool, slot), 0)
     const feeRules = carpool.feeRules
-    summary.unpaidAmount = unitPrice * reserved.length + (feeRules?.serviceFee ?? 0) + (feeRules?.shippingFee ?? 0)
+    summary.unpaidAmount = goodsTotal + (feeRules?.serviceFee ?? 0) + (feeRules?.shippingFee ?? 0)
   }
 
   return summary

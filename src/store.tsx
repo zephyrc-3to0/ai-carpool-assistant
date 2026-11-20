@@ -32,6 +32,7 @@ import {
   confirmRuleChangeOp,
   markOrderedOp,
   proposeRuleChangeOp,
+  purchaseSharesOp,
   purgeExpiredReservations,
   releaseReservationOp,
   reserveSlotsOp,
@@ -138,6 +139,8 @@ interface AppStoreValue {
   reserveShares: (carpoolId: string, slotIds: string[]) => ActionResult<ReservationInfo>
   releaseReservation: (carpoolId: string, reservationId: string) => ActionResult
   confirmPayment: (carpoolId: string, reservationId: string, options?: ConfirmOrderOptions) => ActionResult<Order>
+  /** ConfirmPage 专用：同一次状态迁移内完成预留与付款，避免读取预留前的状态 */
+  purchaseShares: (carpoolId: string, slotIds: string[], options?: ConfirmOrderOptions) => ActionResult<Order>
   // V2.0 招募与截团
   ownerSelfPurchase: (carpoolId: string, groupId: string, quantity: number) => ActionResult
   cancelOwnerSelfPurchase: (carpoolId: string, purchaseId: string) => ActionResult
@@ -380,6 +383,19 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (!permission.ok) return { ok: false, message: permission.message }
       const result = confirmOrderOp(data, currentUser.id, carpoolId, reservationId, options)
       // 失败路径同样需要落库（例如模拟支付失败时释放预留），因此统一写入
+      setData(result.next)
+      return { ok: result.ok, message: result.message, data: result.data }
+    },
+    purchaseShares(carpoolId, slotIds, options = {}) {
+      const carpool = data.carpools.find((item) => item.id === carpoolId)
+      if (!carpool) return { ok: false, message: '没有找到这辆拼车。' }
+      if (carpool.ownerId === currentUser.id) {
+        return { ok: false, message: '车主自购不产生模拟付款，请返回车次详情直接确认自购。' }
+      }
+      const permission = checkPurchasePermission(data, currentUser.id, carpoolId)
+      if (!permission.ok) return { ok: false, message: permission.message }
+      const result = purchaseSharesOp(data, currentUser.id, carpoolId, slotIds, options)
+      // 成功、失败与超时都提交同一次事务的最终状态，确保失败路径释放预留。
       setData(result.next)
       return { ok: result.ok, message: result.message, data: result.data }
     },
